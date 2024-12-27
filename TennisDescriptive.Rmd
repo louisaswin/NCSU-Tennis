@@ -1,0 +1,675 @@
+---
+title: "Untitled"
+author: "Louisa Swintosky"
+date: "2024-10-17"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+NC State Women’s tennis has used the CIZR software (CIZR.com) since 2018 to tag and create
+stat reports for individual matches during the season. The stats summary for each match
+produces 17 metrics that are tagged and linked back to the match film. In its current form, all matches are individual entities which coaches and players then review using the software.
+Having accurate stats that we can present to the players helps drive development plans that are
+used to guide practice and schedule decisions. Highlighting deficits as well as sparking objective
+conversations about what is happening during competition. For the majority of tennis players,
+college is their first opportunity to see match film and stats of themselves.
+Goals of the project:
+
+Cizr CSV
+1. Create a cumulative stats profile for each eligible NC State player based on the 17
+metrics. Visualize key metric averages for both season and career. Eligible players
+will have appeared in a minimum of 7 completed matches or have logged over
+700 points on film.
+
+2. Create a team leaderboard for each stat to help visualize which players are stronger in
+each area based on averages in each metric.
+
+3. Create a plus/minus ratio for each player. Using Bill Jacobsen Aggressive error margin
+formula ((Aces+Winners + Forced Errors)-(double faults + unforced errors)
+
+4. Develop a First serve performance rating metric. Using Craig O’Shannessy formula of first
+serve percentage multiplied by the decimal of first serve win percentage. For example 65%
+first serve percentage x .70 (70%) first serve win percentage equals 45.5.
+
+5. Visualize the relationship between key metrics in wins vs losses. What are the averages for
+NC State players in sets won vs loss for the following stats:
+Unforced errors
+First Serve percentage
+Forced errors
+Double faults per second serve
+Excel File
+
+6. Using the NC State WTA points excel sheet, visualize NC State women's tennis
+performance relative to our recruiting competition for calendar year 2023-24.
+
+7. Visualize top 10 WTA performance by team, singles, doubles and individual players and
+their respective teams.
+
+
+```{r}
+tennis = read.csv("ncstateSinglesStatReport-5.csv")
+head(tennis)
+str(tennis)
+ncol(tennis)
+library(dplyr)
+library(stringr)
+
+# player is NC State player 
+unique(tennis$player) 
+length(unique(tennis$player) )
+# typos / discrepencies between upper and lowercase / random spaces
+
+tennis1 = tennis %>%
+  mutate(player = str_to_title(trimws(player))) %>%
+  mutate(player = recode(player, "Gina Dittman" = "Gina Dittmann"),
+         player = recode(player, "Millie Rajecki" = "Amelia Rajecki"))
+  # upper case first letter and get rid of space 
+  # Gina Dittman --> Gina Dittmann
+  # use recode to make exact replacements rather than partial like gsub does 
+  # gsub changes Gina Dittmann to Gina Dittmannn
+
+sort(unique(tennis1$player))
+length(unique(tennis1$player))
+# looks good
+```
+
+
+
+```{r fixing the incorrect server issue }
+tennis1 <- tennis1 %>%
+  mutate(
+    server = if_else(matchId == '65c1321a3a00009c44c13373' & pointNum == 10000, 1, server),
+    returner = if_else(matchId == '65c1321a3a00009c44c13373' & pointNum == 10000, 0, returner)
+  )
+tennis1 <- tennis1 %>%
+  mutate(
+    server = if_else(matchId == '625a47e0400000e364c4e2f5' & pointNum == 10000, 1, server),
+    returner = if_else(matchId == '625a47e0400000e364c4e2f5' & pointNum == 10000, 0, returner)
+  )
+tennis1 <- tennis1 %>%
+  mutate(
+    server = if_else(matchId == '621cedd74300005c72219d83' & pointNum == 10000, 1, server),
+    returner = if_else(matchId == '621cedd74300005c72219d83' & pointNum == 10000, 0, returner)
+  )
+tennis1 <- tennis1 %>%
+  mutate(
+    server = if_else(matchId == '621cedd74300005c72219d83' & pointNum == 10001, 1, server),
+    returner = if_else(matchId == '621cedd74300005c72219d83' & pointNum == 10001, 0, returner)
+  )
+tennis1 <- tennis1 %>%
+  mutate(
+    server = if_else(matchId == '62244fac450000901f833349' & pointNum == 10000, 1, server),
+    returner = if_else(matchId == '62244fac450000901f833349' & pointNum == 10000, 0, returner)
+  )
+tennis1 <- tennis1 %>%
+  mutate(
+    server = if_else(matchId == '5cb0a1551900000c64ffc6ff' & pointNum == 10000, 1, server),
+    returner = if_else(matchId == '5cb0a1551900000c64ffc6ff' & pointNum == 10000, 0, returner)
+  )
+```
+
+
+```{r trash}
+# find out the eligible players
+# Eligible players will have appeared in a minimum of 7 completed matches or have logged over 700 points on film
+
+tennis1 %>% 
+  group_by(player) %>%
+  summarise(totalpoints = sum(pointsWon)) %>%
+  arrange(desc(totalpoints)) %>%
+  filter(totalpoints > 700)
+# 17 players for over 700 points
+# cant do this because points are cumulative 
+# see belwo for right way 
+
+# win is defined by winning 2 sets
+
+```
+
+```{r Total Points Won & eligible players over 700 points}
+
+tennis2 = tennis1 %>%
+  mutate(point_counter = ifelse(pointWonBy == 0, 1, 0),
+         pointsplayed = ifelse(pointWonBy == 0 | pointWonBy == 1, 1, 0))
+#View(tennis2)
+
+totalpoints = tennis2 %>% 
+  group_by(matchId, player) %>%
+  summarise(totalpointsWon = sum(point_counter),
+            totalpointsPlayed = sum(pointsplayed))
+
+
+pointseligible = tennis2 %>% 
+  group_by(player) %>%
+  summarise(totalpoints = sum(pointsplayed)) %>%
+  arrange(desc(totalpoints)) %>%
+  filter(totalpoints > 700)
+# 14 players for over 700 points
+
+  
+```
+
+```{r eligible players over 7 matches}
+# Function to determine match outcome, handling incomplete matches
+get_match_result <- function(score) {
+  sets <- strsplit(score, "\\|")[[1]]  # Split by "|"
+  player1_wins <- 0
+  player2_wins <- 0
+  #If only only one set, incomplete match (redundant)
+  if (length(sets) <= 1) {
+    return("Incomplete match")
+  }
+  # Check each set
+  for (setNum in 1:length(sets)) {
+    scores <- as.numeric(strsplit(sets[setNum], "-")[[1]])  # Split set by "-"
+    if(setNum <= 2) {  #for the first 2 sets
+      # Check if the set is incomplete (if neither player has reached 6 games)
+      if (length(scores) < 2 || scores[1] < 6 && scores[2] < 6) {
+        return("Incomplete match")
+      }
+      # Count player wins for completed sets
+      if (scores[1] > scores[2]) {
+        player1_wins <- player1_wins + 1
+      } else if (scores[2] > scores[1]) {
+        player2_wins <- player2_wins + 1
+      } else {  ## In the case that any set is tied
+        return("Incomplete match")
+      }
+    } else {  #If it goes to a third set
+            # Check if the set is incomplete (if neither player has reached 6 games)
+      if (scores[1] >= 6 || scores[2] >= 6 || scores[1] + scores[2] == 1 ) {
+        # Count player wins for completed sets
+        if (scores[1] > scores[2]) {
+          player1_wins <- player1_wins + 1
+        } else if (scores[2] > scores[1]) {
+          player2_wins <- player2_wins + 1
+        } else {  ## In the case that any set is tied
+          return("Incomplete match")
+      }
+      } else {
+        return("Incomplete match")
+      }
+    }
+  }
+  
+  # Determine winner based on the number of sets won
+  if (player1_wins == 2) {
+    return("Player 1 won")
+  } else if (player2_wins == 2) {
+    return("Player 2 won")
+  } else {
+    return("Incomplete match")
+  }
+}
+
+# Apply the function to the column
+tennis2$result <- sapply(tennis2$finalScore, get_match_result)
+
+# Display the results, 2 are incorrect 
+tennisTest <- tennis2 %>% select(matchId,finalScore,result,set, tiebreaker) %>%
+  mutate(onezeros = word(finalScore, 3, sep = fixed("|"))) %>% 
+  filter(onezeros == "1-0" | onezeros == "0-1",
+         set==3,
+         tiebreaker =="false") %>%
+  distinct()
+tennisTest
+tennisTest %>% filter(tiebreaker=="true")
+
+#Fixing the matches that end in 1-0 without a tiebreaker
+tennis2 <- tennis2 %>%
+  mutate(result = if_else(matchId == '625a47d14000004464c4e2f3',"Incomplete match", result),
+         result = if_else(matchId == '64359c7341000091fe0a378a',"Incomplete match", result))
+
+
+
+matcheseligble = tennis2 %>% 
+  mutate(matchresult = ifelse(result == "Player 2 won" | result == "Player 1 won", 1, 0)) %>%
+  distinct(matchId, player, matchresult) %>%
+  group_by(player) %>%
+  summarise(matchesplayed = sum(matchresult)) %>%
+  filter(matchesplayed > 6)
+View(matcheseligble)
+
+matcheseligble$player %in% pointseligible$player
+eligible_players = matcheseligble$player
+
+
+tennis2 = tennis2 %>%
+  mutate(completedmatch = ifelse(result == "Player 2 won" | result == "Player 1 won", 1, 0),
+         won_match = ifelse(result == "Player 1 won", 1, 0))
+
+matches = tennis2 %>% 
+  distinct(matchId, player, completedmatch, won_match) %>%
+  group_by(player)
+```
+
+
+```{r Outcomes}
+# all serves in a game should be the same person 
+# state player is 0, opponent is 1
+# outcome and point won by 
+# game won by is same for all point rounds
+
+# game won by says who won that game
+
+# gamesWon cumulative proceeding says how many games nc state player has won
+# breakpoint = true -- add to denominator
+# breakpoint = true and point won - add one to numerator 
+# see also who is serving
+#point won by
+
+# if last value of sets are 0 to 0 outcome, incomplete match, but a winning set
+# 1 to 0 but 0 player wins, incomplete
+# check by 40 and who won
+
+
+tennis3 = tennis2 %>% 
+  mutate(winners = ifelse(pointWonBy == 0 & outcome == "Winner", 1, 0),
+         forced_error = ifelse(pointWonBy == 0 & outcome == "ForcedError", 1, 0),
+         unforced_error = ifelse(pointWonBy == 1 & outcome == "UnforcedError", 1, 0),
+         aces = ifelse(pointWonBy == 0 & outcome == "Ace", 1, 0),
+         fault = ifelse(pointWonBy == 1 & outcome == "Fault", 1, 0)
+         )
+         
+# lets ???    
+#unique(tennis2$outcome) check to make sure no discrepencies 
+
+outcomes = tennis3 %>% 
+  group_by(matchId, player) %>%
+  summarise(winners = sum(winners),
+            forced_errors = sum(forced_error),
+            unforced_errors = sum(unforced_error),
+            aces = sum(aces),
+            double_faults = sum(fault))
+
+```
+
+#pointsWon, outcome, breakPoint, firstServeIn, returnInPlay, rallyLength,
+#outcome = winner, forced error, Type error, unforced error, ace, Fault(double fault)
+
+
+could have stats on sets and match, not just match 
+
+Total Points Won 
+Winners - need to sum these 
+Errors Forced
+Unforced Errors
+Break Points 
+Aces
+Double Faults
+First Serves in -- T/F needs to be percentage -- server
+      firstServeIn == was the first serve in play
+First serves won -- make using first serve in + won 
+second serves in -- 
+second serves won --
+1st serve returns -- returnInPlay & player is not serving 
+          returnInPlay = was the first return made by the non serve
+2nd serve returns
+short rallies won <5 shots - rallyLength - grouping 
+medium rallies won 5-8 shots
+long rallies won >8 shots
+service games won --
+
+```{r Serves}
+tennis4 = tennis3 %>%
+  mutate(first_serves_in = ifelse(server == 0 & firstServeIn == "true", 1, 0),
+         first_serves_out = ifelse(server == 0 & firstServeIn == "false", 1, 0),
+         first_serve_won = ifelse(server == 0 & firstServeIn == "true" & pointWonBy == 0, 1, 0),
+         second_serve_in = ifelse(server == 0 & firstServeIn == "false" & outcome != "Fault", 1, 0),
+         second_serve_won = ifelse(server == 0 & firstServeIn == "false" & pointWonBy == 0, 1, 0))
+# first serve won is the first serve in that won the point out of all first serves that were in 
+# why are Second Serves Won and First Serves Won calculated differently
+# first serves won = of all first serves that are in 
+
+serves = tennis4 %>% 
+  group_by(matchId, player) %>%
+  summarise(firstservesin = sum(first_serves_in),
+            totalfirstserves = sum(first_serves_in, first_serves_out),
+            #prop_servesin = sum(first_serves_in) / sum(first_serves_in, first_serves_out),
+            firstserve_won = sum(first_serve_won),
+            firstservein_total = sum(first_serves_in),
+            #prop_1stwon = sum(first_serve_won) / sum(first_serves_in),
+            second_serves_in = sum(second_serve_in),
+            second_serves_inorout = sum(fault, second_serve_in),
+            #prop_2ndin = sum(second_serve_in)/sum(fault, second_serve_in),
+            second_serve_won = sum(second_serve_won),
+            second_serve_denom = sum(fault, second_serve_in)
+            #prop_2ndwon = sum(second_serve_won)/sum(fault, second_serve_in)
+            )
+
+```
+
+
+```{r Returns}
+tennis5 = tennis4 %>%
+  mutate(firstserve_returns_in = ifelse(server == 1 & firstServeIn == "true" & returnInPlay == "true", 1, 0),
+         firstserve_returns = ifelse(server == 1 & firstServeIn == "true", 1, 0),
+         secserve_returns_in = ifelse(server == 1 & firstServeIn == "false" & returnInPlay == "true", 1, 0),
+         secserve_returns = ifelse(server == 1 & firstServeIn == "false" & outcome != "Fault", 1, 0))
+
+returns = tennis5 %>%
+  group_by(matchId, player) %>%
+  summarise(firstserve_returns_in = sum(firstserve_returns_in),
+            firstserve_returns = sum(firstserve_returns),
+            #prop_1streturns = sum(firstserve_returns_in)/sum(firstserve_returns),
+            sec_serve_returns_in = sum(secserve_returns_in),
+            sec_serve_returns = sum(secserve_returns)
+            #prop_2ndreturns = sum(secserve_returns_in)/sum(secserve_returns)
+            
+  )
+```
+
+
+```{r Rally Lengths}
+tennis6 = tennis5 %>%
+  mutate(short_rally_won = ifelse(pointWonBy == 0 & rallyLength < 5, 1, 0),
+         short_rally = ifelse(rallyLength < 5, 1, 0),
+         medium_rally_won = ifelse(pointWonBy == 0 & rallyLength >= 5 & rallyLength <= 8, 1, 0),
+         medium_rally = ifelse(rallyLength >= 5 & rallyLength <= 8, 1, 0),
+         long_rally_won = ifelse(pointWonBy == 0 & rallyLength > 8, 1, 0),
+         long_rally = ifelse(rallyLength > 8, 1, 0))
+
+rally_lengths = tennis6 %>%
+  group_by(matchId, player) %>%
+  summarise(short_rallies_won = sum(short_rally_won),
+            short_rallies = sum(short_rally),
+            #prop_short = sum(short_rally_won)/sum(short_rally),
+            med_rallies_won = sum(medium_rally_won),
+            med_rallies = sum(medium_rally),
+            #prop_med = sum(medium_rally_won)/sum(medium_rally),
+            long_rallies_won = sum(long_rally_won),
+            long = sum(long_rally)
+            #prop_long = sum(long_rally_won)/sum(long_rally),
+            ) 
+
+
+
+
+```
+
+
+```{r service games won}
+tennis7 <- tennis6 %>%
+  distinct(matchId, player, set, game, .keep_all = TRUE) %>%
+  # keeps only the unique rows of matchId & game
+  mutate(service_game_won = ifelse(server == 0 & gameWonBy == 0, 1, 0),
+         service_games = ifelse(server == 0, 1, 0))
+
+check = tennis7 %>% filter(matchId == "65c1321a3a00009c44c13373") %>%
+  select(matchId, player, set, game, server, gameWonBy, service_game_won, service_games)
+
+service_games = tennis7 %>%
+  group_by(matchId, player) %>%
+  summarise(service_games_won = sum(service_game_won),
+            service_games = sum(service_games)
+  )
+
+#check = service_games %>% filter(matchId == "65c1321a3a00009c44c13373")
+```
+
+```{r Break Points}
+tennis8 = tennis6 %>%
+  mutate(break_pointW = ifelse(server == 1 & breakPoint == "true" & pointWonBy == 0, 1, 0),
+         break_pointL = ifelse(server == 1 & breakPoint == "true" & pointWonBy == 1, 1, 0))
+
+break_points = tennis8 %>%
+  group_by(matchId, player) %>%
+  summarise(break_pointW = sum(break_pointW),
+            break_pointT = sum(break_pointW, break_pointL))
+```
+
+
+```{r shot and error type }
+# error type 
+tennis8c = tennis8 %>%
+  mutate(Long = ifelse(errorType == "Long" & pointWonBy == 1, 1, 0),
+         Long_unforced = ifelse(errorType == "Long" & pointWonBy == 1 & outcome == "UnforcedError", 1, 0),
+         Long_forced = ifelse(errorType == "Long" & pointWonBy == 1 & outcome == "ForcedError", 1, 0),
+         Long_fault = ifelse(errorType == "Long" & pointWonBy == 1 & outcome == "Fault", 1, 0),
+         Net = ifelse(errorType == "Net" & pointWonBy == 1, 1, 0),
+         Net_unforced = ifelse(errorType == "Net" & pointWonBy == 1 & outcome == "UnforcedError", 1, 0),
+         Net_forced = ifelse(errorType == "Net" & pointWonBy == 1 & outcome == "ForcedError", 1, 0),
+         Net_fault = ifelse(errorType == "Net" & pointWonBy == 1 & outcome == "Fault", 1, 0),
+         WinnersAllowed = ifelse(errorType == "" & pointWonBy == 1, 1, 0))
+
+error_types = tennis8c %>%
+  group_by(matchId, player) %>%
+  summarise(Long = sum(Long),
+            Long_unforced = sum(Long_unforced),
+            Long_forced = sum(Long_forced),
+            Long_fault = sum(Long_fault),
+            Net = sum(Net),
+            Net_unforced = sum(Net_unforced),
+            Net_forced = sum(Net_forced),
+            Net_fault = sum(Net_fault),
+            WinnersAllowed = sum(WinnersAllowed))
+  
+
+check = error_types %>% filter(matchId == "65c1321a3a00009c44c13373")
+check
+
+
+# shot type
+tennis8d = tennis8c %>%
+  mutate(winner_forehand = ifelse(outcome == "Winner" & pointWonBy == 0 & shotType == "Forehand", 1, 0),
+         winner_backhand = ifelse(outcome == "Winner" & pointWonBy == 0 & shotType == "Backhand", 1, 0),
+         winner_volley = ifelse(outcome == "Winner" & pointWonBy == 0 & shotType == "Volley", 1, 0),
+         forcederror_forehand = ifelse(outcome == "ForcedError" & pointWonBy == 0 & shotType == "Forehand", 1, 0),
+         forcederror_backhand = ifelse(outcome == "ForcedError" & pointWonBy == 0 & shotType == "Backhand", 1, 0),
+         forcederror_volley = ifelse(outcome == "ForcedError" & pointWonBy == 0 & shotType == "Volley", 1, 0),
+         unforcederror_forehand = ifelse(outcome == "UnforcedError" & pointWonBy == 1 & shotType == "Forehand", 1, 0),
+         unforcederror_backhand = ifelse(outcome == "UnforcedError" & pointWonBy == 1 & shotType == "Backhand", 1, 0),
+         unforcederror_volley = ifelse(outcome == "UnforcedError" & pointWonBy == 1 & shotType == "Volley", 1, 0)
+         )
+
+shot_types = tennis8d %>%
+  group_by(matchId, player) %>%
+  summarise(winner_forehand = sum(winner_forehand),
+            winner_backhand = sum(winner_backhand),
+            winner_volley = sum(winner_volley),
+            forcederror_forehand = sum(forcederror_forehand),
+            forcederror_backhand = sum(forcederror_backhand),
+            forcederror_volley = sum(forcederror_volley),
+            unforcederror_forehand = sum(unforcederror_forehand),
+            unforcederror_backhand = sum(unforcederror_backhand),
+            unforcederror_volley = sum(unforcederror_volley))
+
+check = shot_types %>% filter(matchId == "65c1321a3a00009c44c13373")
+check
+
+
+```
+
+
+```{r Combine all}
+keystats = totalpoints %>%
+  full_join(matches, by = c("matchId", "player")) %>%
+  full_join(outcomes, by = c("matchId", "player")) %>%
+  full_join(break_points, by = c("matchId", "player")) %>%
+  full_join(serves, by = c("matchId", "player")) %>%
+  full_join(returns, by = c("matchId", "player")) %>%
+  full_join(rally_lengths, by = c("matchId", "player")) %>%
+  full_join(service_games, by = c("matchId", "player")) %>%
+  full_join(error_types, by = c("matchId", "player")) %>%
+  full_join(shot_types, by = c("matchId", "player"))
+
+keystats
+nrow(keystats)
+#tennis2[46163,]
+# https://www.cizrtennis.com/userMatches//watch/5c469405170000344ebe45bc?time=0.03336666666666667 
+```
+
+
+```{r Seasons}
+library(lubridate)
+str(tennis2$date)
+
+month.abb
+paste0(month.abb[1], ", 2019")
+
+tennis9 = tennis8 %>%
+  mutate(date_var = as.Date(date),
+         month = month(date_var),
+         month = month.abb[month],
+         year = year(date_var),
+         month_year = paste0(month, ", ", year),
+         season = case_when(
+           date_var <= as.Date("2019-08-31") ~ 1,
+           date_var > as.Date("2019-08-31") & date_var < as.Date("2020-06-01") ~ 2,
+           date_var > as.Date("2020-08-31") & date_var < as.Date("2021-06-01") ~ 3,
+           date_var > as.Date("2021-08-31") & date_var < as.Date("2022-06-01") ~ 4,
+           date_var > as.Date("2022-08-31") & date_var < as.Date("2023-06-01") ~ 5,
+           date_var > as.Date("2023-08-31") & date_var < as.Date("2024-06-01") ~ 6,
+           TRUE ~ NA_real_
+         ))
+
+#tennis2[46163,]
+#tennis9[46163,]
+daysss = tennis9 %>%
+  select(date_var, month, year, season) %>%
+  arrange(date_var) %>%
+  distinct(month, year, season)
+
+# seasons from fall to summer
+# ex September 2020 - June 2021
+
+
+
+
+
+```
+
+
+
+
+```{r}
+# whole career
+tennis10 = tennis9 %>%
+  select(matchId, player) %>%
+  distinct()
+
+keystats_player = tennis10 %>%
+  full_join(keystats, by = "matchId")
+  
+
+keystats_avgs = keystats_player %>%
+  select(-matchId) %>%
+  group_by(player) %>%
+  summarise(across(everything(), mean, na.rm = TRUE)) %>%
+  filter(player %in% eligible_players) %>%
+  mutate(ratio = (aces + winners + forced_errors) - (double_faults + unforced_errors),
+         firstserve_performance = prop_servesin*prop_1stwon,
+         season = "career")
+View(keystats_avgs)
+keystats_avgs$ratio
+keystats_avgs$firstserve_performance
+
+# Create a plus/minus ratio for each player . Using Bill Jacobsen Aggressive error margin
+    #formula ((Aces+Winners + Forced Errors)-(double faults + unforced errors)
+#4. Develop a First serve performance rating metric. Using Craig O’Shannessy formula of first
+    # serve percentage multiplied by the decimal of first serve win percentage. For example 65%
+    # first serve percentage x .70 (70%) first serve win percentage equals 45.5.
+
+write.csv(keystats_avgs, "career_stats.csv", row.names = FALSE)
+
+
+
+keystats_sums = keystats_player %>%
+  select(-matchId) %>%
+  group_by(player) %>%
+  summarise(across(where(is.numeric), list(sum = ~ sum(.x, na.rm = TRUE)))) %>%
+  filter(player %in% eligible_players) %>%
+  mutate(ratio = (aces_sum + winners_sum + forced_errors_sum) - (double_faults_sum + unforced_errors_sum),
+         firstserve_performance_sum = prop_servesin_sum*prop_1stwon_sum)
+View(keystats_sums)
+
+write.csv(keystats_sums, "career_stats_sums.csv", row.names = FALSE)
+
+```
+
+
+```{r}
+# now all seasons:
+
+tennis11 = tennis9 %>%
+  select(matchId, player, season) %>%
+  distinct() 
+
+keystats_player_seasons = tennis11 %>%
+  full_join(keystats, by = "matchId")
+
+keystats_avgs_seasons = keystats_player_seasons %>%
+  select(-matchId) %>%
+  group_by(player, season) %>%
+  summarise(across(everything(), mean, na.rm = TRUE)) %>%
+  filter(player %in% eligible_players) %>%
+  mutate(ratio = (aces + winners + forced_errors) - (double_faults + unforced_errors),
+         firstserve_performance = prop_servesin*prop_1stwon) %>%
+  arrange(season, player)
+View(keystats_avgs_seasons)
+
+write.csv(keystats_avgs_seasons, "keystats_avgs_seasons.csv", row.names = FALSE)
+```
+
+```{r Combine career avgs with season}
+keystats_avgs_seasons = keystats_avgs_seasons[, colnames(keystats_avgs)]
+
+all_stats = rbind(keystats_avgs, keystats_avgs_seasons)
+write.csv(all_stats, "all_stats.csv", row.names = FALSE)
+```
+
+
+```{r }
+
+```
+
+###HERE
+```{r trying something new}
+tennis10b = tennis9 %>%
+  select(matchId, player, season, month_year) %>%
+  distinct() 
+  
+nrow(tennis10b)
+nrow(keystats)
+
+keystats_match = tennis10b %>%
+  full_join(keystats, by = c("matchId", "player")) %>%
+  filter(player %in% eligible_players)
+
+sum(is.na(keystats_match))
+
+rows_with_na <- which(rowSums(is.na(keystats_match)) > 0)
+keystats_match[rows_with_na, ]
+
+write.csv(keystats_match, "all_stats.csv", row.names = FALSE)
+
+# not rolling things up so it will be more dynamic 
+```
+
+```{r Player Bios}
+playr = c("Abigail Rencheli", "Adriana Reami", "Alana Smith", "Amanda Rebol", "Amelia Rajecki", "Anna Rogers",
+     "Anna Zyryanova", "Bianca Moldovan", "Diana Shnaider", "Gina Dittmann", "Jaeda Daniel", "Lexi Keberle",
+     "Maddy Zampardo", "Nell Miller", "Priska Nugroho", "Sophie Abrams") 
+        
+
+Hometown = c("SARASOTA, FLA.", "MIAMI, FLA.", "FORT WASHINGTON, MD.", "CUMMING, GA.", "NOTTINGHAM, ENGLAND", "STAMFORD, CONN.", "MOSCOW, RUSSIA", "LIVONIA, MICH.", "MOSCOW, RUSSIA", "ESSEN, GERMANY", "NEWTOWN SQUARE, PA.", "WEST BEND, WISC.", "DETROIT, MI", "KENT, ENGLAND", "JAKARTA, INDONESIA", "GERMANTOWN, TENN.")
+
+hometownz = data.frame(player = playr, Hometown = Hometown)
+length(Hometown)
+
+keystats_match_extra = keystats_match %>%
+  left_join(hometownz, by = c("player"))
+
+
+```
+
+```{r Write csv}
+write.csv(keystats_match_extra, "all_stats.csv", row.names = FALSE)
+```
+
+
+
